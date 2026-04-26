@@ -16,6 +16,7 @@ async function bootstrap() {
 
   await app.listen(3000);
   console.log('[boot] Backend ready on port 3000');
+  console.log('[boot] ✓ App running at http://localhost (via Caddy on port 80)');
 }
 
 bootstrap();
