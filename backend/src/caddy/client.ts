@@ -1,13 +1,24 @@
+import * as http from 'http';
 import { env } from '../env';
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function adminGet(path: string): Promise<{ ok: boolean; status: number }> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(path, env.caddyAdminUrl);
+    http.get({ hostname: url.hostname, port: url.port, path: url.pathname }, (res) => {
+      res.resume();
+      resolve({ ok: (res.statusCode ?? 0) < 400, status: res.statusCode ?? 0 });
+    }).on('error', reject);
+  });
+}
+
 export async function waitForCaddy(retries = 10, delayMs = 1000): Promise<void> {
   for (let i = 0; i < retries; i++) {
     try {
-      const res = await fetch(`${env.caddyAdminUrl}/config/`);
+      const res = await adminGet('/config/');
       if (res.ok) {
         console.log('[boot] Caddy admin API ready');
         return;
