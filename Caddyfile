@@ -1,0 +1,23 @@
+{
+  admin 0.0.0.0:2019
+}
+
+:80 {
+  # SSE logs — flush_interval -1 is critical, without it Caddy buffers SSE data
+  handle /api/deployments/*/logs {
+    reverse_proxy backend:3000 {
+      flush_interval -1
+    }
+  }
+
+  # Backend API
+  handle /api/* {
+    uri strip_prefix /api
+    reverse_proxy backend:3000
+  }
+
+  # Frontend — catch-all (SPA)
+  handle {
+    reverse_proxy frontend:5173
+  }
+}

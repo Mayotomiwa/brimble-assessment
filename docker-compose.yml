@@ -1,0 +1,110 @@
+version: '3.9'
+
+services:
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Backend API + Worker ───────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL:           postgres://app:app@db:5432/app
+      CADDY_ADMIN_URL:        http://caddy:2019
+      REGISTRY_URL:           registry:5000
+      # CRITICAL: 172.17.0.1 is the Linux docker0 bridge IP.
+      # Mac/Windows users: set DOCKER_GATEWAY_IP=host.docker.internal in .env
+      DOCKER_GATEWAY_IP:      172.17.0.1
+      HEALTH_CHECK_RETRIES:   "5"
+      HEALTH_CHECK_INTERVAL:  "2000"
+      SIGTERM_TIMEOUT:        "10"
+      BUILD_TIMEOUT_MINUTES:  "10"
+    depends_on:
+      db:
+        condition: service_healthy
+      caddy:
+        condition: service_started
+      registry:
+        condition: service_started
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - uploads:/app/uploads
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Caddy ingress ──────────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "2019:2019"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Postgres ───────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB:       app
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Local OCI Registry ─────────────────────────────────────────────────────
+  registry:
+    image: registry:2
+    environment:
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  db_data:
+  caddy_data:
+  registry_data:
+  uploads:
