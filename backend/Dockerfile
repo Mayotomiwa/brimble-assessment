@@ -6,7 +6,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
   && curl -fsSL https://raw.githubusercontent.com/railwayapp/railpack/main/install.sh | sh \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g pnpm
 
 RUN npm install -g pnpm
 
