@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { db, Deployment, ImageTag } from '../db/queries';
+import { caddyClient } from '../caddy/client';
+import { dockerClient } from '../docker/client';
 import { WorkerService } from '../worker/worker.service';
 
 @Injectable()
@@ -36,6 +38,10 @@ export class DeploymentsService {
   async remove(id: string): Promise<void> {
     const deployment = await db.getDeployment(id);
     if (!deployment) throw new NotFoundException('Deployment not found');
+    await Promise.all([
+      deployment.caddy_route_id ? caddyClient.removeRoute(id).catch(() => {}) : Promise.resolve(),
+      deployment.container_id ? dockerClient.stopContainer(deployment.container_id).catch(() => {}) : Promise.resolve(),
+    ]);
     await db.deleteDeployment(id);
   }
 
@@ -56,7 +62,7 @@ export class DeploymentsService {
     }
     const tag = await db.getImageTag(body.imageTagId);
     if (!tag) throw new NotFoundException('Image tag not found');
-    this.worker.enqueue(id);
+    this.worker.enqueueRollback(id, tag.registry_ref);
   }
 
   async listTags(id: string): Promise<ImageTag[]> {

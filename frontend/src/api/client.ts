@@ -8,7 +8,7 @@ export interface Deployment {
   sourceType: 'git' | 'tarball';
   status: DeploymentStatus;
   liveUrl: string | null;
-  currentImageTag: string | null;
+  currentImageTagId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -20,55 +20,44 @@ export interface ImageTag {
   createdAt: string;
 }
 
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText, code: 'UNKNOWN' }));
+    throw new Error(err.error ?? res.statusText);
+  }
+  if (res.status === 204) return undefined as T;
+  const body = await res.json();
+  return body.data as T;
+}
+
 export const api = {
-  async createDeployment(gitUrl: string): Promise<Deployment> {
-    const res = await fetch(`${BASE}/deployments`, {
+  createDeployment: (gitUrl: string) =>
+    request<Deployment>(`${BASE}/deployments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ gitUrl }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+    }),
 
-  async listDeployments(): Promise<Deployment[]> {
-    const res = await fetch(`${BASE}/deployments`);
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+  listDeployments: () =>
+    request<Deployment[]>(`${BASE}/deployments`),
 
-  async getDeployment(id: string): Promise<Deployment> {
-    const res = await fetch(`${BASE}/deployments/${id}`);
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+  getDeployment: (id: string) =>
+    request<Deployment>(`${BASE}/deployments/${id}`),
 
-  async getImageTags(deploymentId: string): Promise<ImageTag[]> {
-    const res = await fetch(`${BASE}/deployments/${deploymentId}/tags`);
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+  getImageTags: (id: string) =>
+    request<ImageTag[]>(`${BASE}/deployments/${id}/tags`),
 
-  async rollback(deploymentId: string, imageTagId: string): Promise<void> {
-    const res = await fetch(`${BASE}/deployments/${deploymentId}/rollback`, {
+  redeploy: (id: string) =>
+    request<void>(`${BASE}/deployments/${id}/redeploy`, { method: 'POST' }),
+
+  rollback: (id: string, imageTagId: string) =>
+    request<void>(`${BASE}/deployments/${id}/rollback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imageTagId }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-  },
+    }),
 
-  async redeploy(deploymentId: string): Promise<void> {
-    const res = await fetch(`${BASE}/deployments/${deploymentId}/redeploy`, {
-      method: 'POST',
-    });
-    if (!res.ok) throw new Error(await res.text());
-  },
-
-  async deleteDeployment(deploymentId: string): Promise<void> {
-    const res = await fetch(`${BASE}/deployments/${deploymentId}`, {
-      method: 'DELETE',
-    });
-    if (!res.ok) throw new Error(await res.text());
-  },
+  deleteDeployment: (id: string) =>
+    request<void>(`${BASE}/deployments/${id}`, { method: 'DELETE' }),
 };
