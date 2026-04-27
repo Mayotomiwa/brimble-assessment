@@ -1,0 +1,6 @@
+[grpc]
+  address = ["unix:///run/buildkit/buildkitd.sock", "tcp://0.0.0.0:1234"]
+
+[registry."registry:5002"]
+  http = true
+  insecure = true
