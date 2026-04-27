@@ -21,6 +21,18 @@ export function IndexPage() {
     setSelectedId(id);
   }
 
+  async function handleRedeploy(id: string) {
+    await api.redeploy(id);
+    queryClient.invalidateQueries({ queryKey: ['deployments'] });
+    setSelectedId(id);
+  }
+
+  async function handleDelete(id: string) {
+    await api.deleteDeployment(id);
+    queryClient.invalidateQueries({ queryKey: ['deployments'] });
+    if (selectedId === id) setSelectedId(null);
+  }
+
   return (
     <div style={{ maxWidth: 960, margin: '0 auto', padding: '32px 24px', fontFamily: 'system-ui, sans-serif' }}>
       <h1 style={{ marginTop: 0, marginBottom: 24, fontSize: 24 }}>Brimble Deploy</h1>
@@ -29,6 +41,8 @@ export function IndexPage() {
         deployments={deployments}
         selectedId={selectedId}
         onSelect={setSelectedId}
+        onRedeploy={handleRedeploy}
+        onDelete={handleDelete}
       />
       {selectedId && (
         <>

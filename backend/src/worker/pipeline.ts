@@ -23,11 +23,23 @@ export async function runPipeline(deploymentId: string): Promise<void> {
 
     const imageTag = `sha-${Date.now()}`;
     const registryRef = `${env.registryUrl}/app-${deploymentId}:${imageTag}`;
-    const cacheRef = deployment.cache_key
-      ? `${env.registryUrl}/cache/app-${deployment.cache_key}:cache`
-      : null;
+    const cacheKey = deployment.cache_key ?? null;
 
-    await runRailpack(deploymentId, sourceDir, registryRef, cacheRef);
+    await runRailpack(deploymentId, sourceDir, registryRef, cacheKey);
+
+    // Push to registry for rollback support. Best-effort with a hard timeout —
+    // the Docker daemon may not be able to reach registry:5000 over HTTP from the host,
+    // so we never let a stalled push block the deploy.
+    try {
+      await Promise.race([
+        dockerClient.pushImage(registryRef),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('push timed out')), 15_000),
+        ),
+      ]);
+    } catch (err: any) {
+      writeLog(deploymentId, `[warn] registry push skipped: ${err.message}`, 'stderr', 'build');
+    }
 
     const tagRecord = await db.createImageTag({
       deploymentId,
@@ -136,17 +148,16 @@ async function runRailpack(
   deploymentId: string,
   sourceDir: string,
   registryRef: string,
-  cacheRef: string | null,
+  cacheKey: string | null,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const args = ['build'];
+    const args = ['build', '--name', registryRef];
 
-    if (cacheRef) {
-      args.push('--cache-from', `type=registry,ref=${cacheRef}`);
-      args.push('--cache-to', `type=registry,ref=${cacheRef},mode=max`);
+    if (cacheKey) {
+      args.push('--cache-key', cacheKey);
     }
 
-    args.push('--tag', registryRef, '.');
+    args.push('.');
 
     const proc = spawn('railpack', args, { cwd: sourceDir });
 

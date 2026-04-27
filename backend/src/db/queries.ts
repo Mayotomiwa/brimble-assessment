@@ -104,6 +104,8 @@ export const db = {
   },
 
   async deleteDeployment(id: string): Promise<void> {
+    await pool().query(`DELETE FROM logs WHERE deployment_id = $1`, [id]);
+    await pool().query(`DELETE FROM image_tags WHERE deployment_id = $1`, [id]);
     await pool().query(`DELETE FROM deployments WHERE id = $1`, [id]);
   },
 

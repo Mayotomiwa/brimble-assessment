@@ -31,7 +31,19 @@ async function pullImage(registryRef: string): Promise<void> {
 
 export const dockerClient = {
   async runContainer(registryRef: string): Promise<string> {
-    await pullImage(registryRef);
+    // Try registry pull first (succeeds for rollback when image was previously pushed).
+    // Has a hard timeout because the host Docker daemon can't resolve the registry
+    // hostname via Compose DNS — if it can't pull, the image is already local.
+    try {
+      await Promise.race([
+        pullImage(registryRef),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('pull timed out')), 15_000),
+        ),
+      ]);
+    } catch {
+      // image is in local store from Railpack's tarball export — createContainer will find it
+    }
 
     const container = await docker.createContainer({
       Image: registryRef,
@@ -43,6 +55,19 @@ export const dockerClient = {
 
     await container.start();
     return container.id;
+  },
+
+  async pushImage(registryRef: string): Promise<void> {
+    const image = docker.getImage(registryRef);
+    await new Promise<void>((resolve, reject) => {
+      (image as any).push({}, (err: Error | null, stream: NodeJS.ReadableStream) => {
+        if (err) return reject(err);
+        docker.modem.followProgress(stream, (err: Error | null) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    });
   },
 
   async getHostPort(containerId: string): Promise<number> {
