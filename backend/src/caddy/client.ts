@@ -1,6 +1,8 @@
 import * as http from 'http';
 import { env } from '../env';
 
+const ROUTES_PATH = '/config/apps/http/servers/main/routes';
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -32,11 +34,50 @@ export async function waitForCaddy(retries = 10, delayMs = 1000): Promise<void> 
   process.exit(1);
 }
 
-// Route management — implemented per phase
 export const caddyClient = {
-  async addRoute(_deploymentId: string, _hostPort: number): Promise<string> {
-    return '';
+  async addRoute(deploymentId: string, hostPort: number): Promise<string> {
+    const route = {
+      '@id': `deploy-${deploymentId}`,
+      match: [{ path: [`/deploys/${deploymentId}`, `/deploys/${deploymentId}/*`] }],
+      handle: [
+        {
+          handler: 'subroute',
+          routes: [{
+            handle: [{
+              handler: 'rewrite',
+              uri_substring: [{ find: `/deploys/${deploymentId}`, replace: '' }],
+            }],
+          }],
+        },
+        {
+          handler: 'reverse_proxy',
+          upstreams: [{ dial: `${env.dockerGatewayIp}:${hostPort}` }],
+        },
+      ],
+    };
+
+    const res = await adminRequest('POST', ROUTES_PATH, route);
+    if (!res.ok) throw new Error(`Caddy addRoute failed: ${res.status} ${res.text}`);
+    return `deploy-${deploymentId}`;
   },
-  async updateRoute(_deploymentId: string, _newHostPort: number): Promise<void> {},
-  async removeRoute(_deploymentId: string): Promise<void> {},
+
+  async updateRoute(deploymentId: string, newHostPort: number): Promise<void> {
+    const routeId = `deploy-${deploymentId}`;
+    const getRes = await adminRequest('GET', `${ROUTES_PATH}/.../${routeId}`);
+    if (!getRes.ok) throw new Error(`Caddy updateRoute GET failed: ${getRes.status} ${getRes.text}`);
+    const route = JSON.parse(getRes.text);
+    const proxyHandle = (route.handle as any[])?.find((h: any) => h.handler === 'reverse_proxy');
+    if (proxyHandle) {
+      proxyHandle.upstreams[0].dial = `${env.dockerGatewayIp}:${newHostPort}`;
+    }
+    const putRes = await adminRequest('PUT', `${ROUTES_PATH}/.../${routeId}`, route);
+    if (!putRes.ok) throw new Error(`Caddy updateRoute PUT failed: ${putRes.status} ${putRes.text}`);
+  },
+
+  async removeRoute(deploymentId: string): Promise<void> {
+    const res = await adminRequest('DELETE', `${ROUTES_PATH}/.../deploy-${deploymentId}`);
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Caddy removeRoute failed: ${res.status}`);
+    }
+  },
 };
