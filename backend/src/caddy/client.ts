@@ -7,51 +7,20 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Uses Node's http module instead of fetch to avoid Sec-Fetch-Mode: cors
-// which triggers Caddy's origin check from inside Docker containers.
-function adminRequest(
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<{ ok: boolean; status: number; text: string }> {
+function adminGet(path: string): Promise<{ ok: boolean; status: number }> {
   return new Promise((resolve, reject) => {
     const url = new URL(path, env.caddyAdminUrl);
-    const payload = body ? JSON.stringify(body) : undefined;
-
-    const req = http.request(
-      {
-        hostname: url.hostname,
-        port: url.port || 2019,
-        path: url.pathname,
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
-        },
-      },
-      (res) => {
-        let data = '';
-        res.on('data', chunk => (data += chunk));
-        res.on('end', () =>
-          resolve({
-            ok: (res.statusCode ?? 0) < 400,
-            status: res.statusCode ?? 0,
-            text: data,
-          }),
-        );
-      },
-    );
-
-    req.on('error', reject);
-    if (payload) req.write(payload);
-    req.end();
+    http.get({ hostname: url.hostname, port: url.port, path: url.pathname }, (res) => {
+      res.resume();
+      resolve({ ok: (res.statusCode ?? 0) < 400, status: res.statusCode ?? 0 });
+    }).on('error', reject);
   });
 }
 
 export async function waitForCaddy(retries = 10, delayMs = 1000): Promise<void> {
   for (let i = 0; i < retries; i++) {
     try {
-      const res = await adminRequest('GET', '/config/');
+      const res = await adminGet('/config/');
       if (res.ok) {
         console.log('[boot] Caddy admin API ready');
         return;

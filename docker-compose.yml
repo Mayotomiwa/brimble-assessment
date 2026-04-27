@@ -104,9 +104,7 @@ services:
   registry:
     image: registry:2
     environment:
-      REGISTRY_HTTP_ADDR: 0.0.0.0:5002
-    ports:
-      - "5002:5002"
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
     volumes:
       - registry_data:/var/lib/registry
     restart: unless-stopped

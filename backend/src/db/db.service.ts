@@ -1,12 +1,7 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Pool } from 'pg';
-import { env } from '../env';
+import { Injectable } from '@nestjs/common';
+import { db } from './queries';
 
 @Injectable()
-export class DbService implements OnModuleDestroy {
-  readonly pool = new Pool({ connectionString: env.databaseUrl });
-
-  async onModuleDestroy() {
-    await this.pool.end();
-  }
+export class DbService {
+  readonly db = db;
 }
