@@ -1,13 +1,57 @@
+import * as http from 'http';
 import { env } from '../env';
+
+const ROUTES_PATH = '/config/apps/http/servers/main/routes';
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Uses Node's http module instead of fetch to avoid Sec-Fetch-Mode: cors
+// which triggers Caddy's origin check from inside Docker containers.
+function adminRequest(
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<{ ok: boolean; status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(path, env.caddyAdminUrl);
+    const payload = body ? JSON.stringify(body) : undefined;
+
+    const req = http.request(
+      {
+        hostname: url.hostname,
+        port: url.port || 2019,
+        path: url.pathname,
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', chunk => (data += chunk));
+        res.on('end', () =>
+          resolve({
+            ok: (res.statusCode ?? 0) < 400,
+            status: res.statusCode ?? 0,
+            text: data,
+          }),
+        );
+      },
+    );
+
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
 export async function waitForCaddy(retries = 10, delayMs = 1000): Promise<void> {
   for (let i = 0; i < retries; i++) {
     try {
-      const res = await fetch(`${env.caddyAdminUrl}/config/`);
+      const res = await adminRequest('GET', '/config/');
       if (res.ok) {
         console.log('[boot] Caddy admin API ready');
         return;
@@ -21,11 +65,49 @@ export async function waitForCaddy(retries = 10, delayMs = 1000): Promise<void> 
   process.exit(1);
 }
 
-// Route management — implemented per phase
 export const caddyClient = {
-  async addRoute(_deploymentId: string, _hostPort: number): Promise<string> {
-    return '';
+  async addRoute(deploymentId: string, hostPort: number): Promise<string> {
+    const route = {
+      '@id': `deploy-${deploymentId}`,
+      match: [{ path: [`/deploys/${deploymentId}`, `/deploys/${deploymentId}/*`] }],
+      handle: [
+        {
+          handler: 'subroute',
+          routes: [{
+            handle: [{
+              handler: 'rewrite',
+              uri_substring: [{ find: `/deploys/${deploymentId}`, replace: '' }],
+            }],
+          }],
+        },
+        {
+          handler: 'reverse_proxy',
+          upstreams: [{ dial: `${env.dockerGatewayIp}:${hostPort}` }],
+        },
+      ],
+    };
+
+    const res = await adminRequest('POST', ROUTES_PATH, route);
+    if (!res.ok) throw new Error(`Caddy addRoute failed: ${res.status} ${res.text}`);
+    return `deploy-${deploymentId}`;
   },
-  async updateRoute(_deploymentId: string, _newHostPort: number): Promise<void> {},
-  async removeRoute(_deploymentId: string): Promise<void> {},
+
+  async updateRoute(deploymentId: string, newHostPort: number): Promise<void> {
+    const res = await adminRequest(
+      'PUT',
+      `${ROUTES_PATH}/.../deploy-${deploymentId}`,
+      {
+        handler: 'reverse_proxy',
+        upstreams: [{ dial: `${env.dockerGatewayIp}:${newHostPort}` }],
+      },
+    );
+    if (!res.ok) throw new Error(`Caddy updateRoute failed: ${res.status}`);
+  },
+
+  async removeRoute(deploymentId: string): Promise<void> {
+    const res = await adminRequest('DELETE', `${ROUTES_PATH}/.../deploy-${deploymentId}`);
+    if (!res.ok && res.status !== 404) {
+      throw new Error(`Caddy removeRoute failed: ${res.status}`);
+    }
+  },
 };

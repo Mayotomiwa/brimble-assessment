@@ -1,10 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { enqueue, isBuilding } from './queue';
 
 @Injectable()
 export class WorkerService {
-  enqueue(_deploymentId: string): void {}
+  enqueue(deploymentId: string): void {
+    enqueue(deploymentId);
+  }
 
-  isBuilding(_deploymentId: string): boolean {
-    return false;
+  isBuilding(deploymentId: string): boolean {
+    return isBuilding(deploymentId);
   }
 }
