@@ -5,6 +5,7 @@
 :80 {
   # SSE logs — flush_interval -1 is critical, without it Caddy buffers SSE data
   handle /api/deployments/*/logs {
+    uri strip_prefix /api
     reverse_proxy backend:3000 {
       flush_interval -1
     }

@@ -16,6 +16,16 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # ── BuildKit daemon (required by Railpack) ────────────────────────────────
+  buildkit:
+    image: moby/buildkit:latest
+    container_name: buildkit
+    privileged: true
+    volumes:
+      - ./buildkitd.toml:/etc/buildkit/buildkitd.toml
+      - buildkit_cache:/var/lib/buildkit
+    restart: unless-stopped
+
   # ── Backend API + Worker ───────────────────────────────────────────────────
   backend:
     build:
@@ -24,20 +34,23 @@ services:
     environment:
       DATABASE_URL:           postgres://app:app@db:5432/app
       CADDY_ADMIN_URL:        http://caddy:2019
-      REGISTRY_URL:           registry:5000
+      REGISTRY_URL:           registry:5002
+      BUILDKIT_HOST:          tcp://buildkit:1234
       # CRITICAL: 172.17.0.1 is the Linux docker0 bridge IP.
       # Mac/Windows users: set DOCKER_GATEWAY_IP=host.docker.internal in .env
       DOCKER_GATEWAY_IP:      172.17.0.1
       HEALTH_CHECK_RETRIES:   "5"
       HEALTH_CHECK_INTERVAL:  "2000"
       SIGTERM_TIMEOUT:        "10"
-      BUILD_TIMEOUT_MINUTES:  "10"
+      BUILD_TIMEOUT_MINUTES:  "30"
     depends_on:
       db:
         condition: service_healthy
       caddy:
         condition: service_started
       registry:
+        condition: service_started
+      buildkit:
         condition: service_started
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -91,9 +104,9 @@ services:
   registry:
     image: registry:2
     environment:
-      REGISTRY_HTTP_ADDR: 0.0.0.0:5000
+      REGISTRY_HTTP_ADDR: 0.0.0.0:5002
     ports:
-      - "5000:5000"
+      - "5002:5002"
     volumes:
       - registry_data:/var/lib/registry
     restart: unless-stopped
@@ -108,3 +121,10 @@ volumes:
   caddy_data:
   registry_data:
   uploads:
+  buildkit_cache:
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1450"

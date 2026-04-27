@@ -6,12 +6,13 @@ RUN apt-get update && apt-get install -y \
     curl \
     ca-certificates \
   && curl -fsSL https://raw.githubusercontent.com/railwayapp/railpack/main/install.sh | sh \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g pnpm
 
 WORKDIR /app
-COPY package*.json ./
-RUN npm ci
+COPY package.json ./
+RUN pnpm install
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
 CMD ["node", "dist/main.js"]
