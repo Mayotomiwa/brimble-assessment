@@ -88,24 +88,28 @@ export const db = {
 
   async updateDeployment(
     id: string,
-    updates: Partial<Pick<Deployment,
-      | 'status' | 'container_id' | 'prev_container_id'
-      | 'host_port' | 'live_url' | 'caddy_route_id' | 'current_image_tag_id'
+    updates: Partial<Pick<
+      Deployment,
+      | 'status'
+      | 'container_id'
+      | 'prev_container_id'
+      | 'host_port'
+      | 'live_url'
+      | 'caddy_route_id'
+      | 'current_image_tag_id'
     >>,
   ): Promise<void> {
     const fields = Object.keys(updates) as (keyof typeof updates)[];
     if (fields.length === 0) return;
-    const set = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
+    const setClauses = fields.map((f, i) => `${f} = $${i + 1}`).join(', ');
     const values = fields.map(f => updates[f]);
     await pool().query(
-      `UPDATE deployments SET ${set}, updated_at = NOW() WHERE id = $${fields.length + 1}`,
+      `UPDATE deployments SET ${setClauses}, updated_at = NOW() WHERE id = $${fields.length + 1}`,
       [...values, id],
     );
   },
 
   async deleteDeployment(id: string): Promise<void> {
-    await pool().query(`DELETE FROM logs WHERE deployment_id = $1`, [id]);
-    await pool().query(`DELETE FROM image_tags WHERE deployment_id = $1`, [id]);
     await pool().query(`DELETE FROM deployments WHERE id = $1`, [id]);
   },
 

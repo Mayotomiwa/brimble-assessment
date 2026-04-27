@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/* \
   && npm install -g pnpm
 
+RUN npm install -g pnpm
+
 WORKDIR /app
 COPY package.json ./
 RUN pnpm install
