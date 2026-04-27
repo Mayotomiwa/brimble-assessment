@@ -1,4 +1,4 @@
-import { runPipeline } from './pipeline';
+import { runPipeline, runRollback } from './pipeline';
 
 // One active job per deployment — prevents concurrent builds racing on
 // Caddy routes and the cache volume.
@@ -19,4 +19,17 @@ export function enqueue(deploymentId: string): void {
 
 export function isBuilding(deploymentId: string): boolean {
   return activeLocks.has(deploymentId);
+}
+
+export function enqueueRollback(deploymentId: string, registryRef: string): void {
+  if (activeLocks.has(deploymentId)) {
+    console.warn(`[queue] ${deploymentId} already building — ignoring rollback enqueue`);
+    return;
+  }
+
+  const job = runRollback(deploymentId, registryRef)
+    .catch(err => console.error(`[queue] Rollback error for ${deploymentId}:`, err))
+    .finally(() => activeLocks.delete(deploymentId));
+
+  activeLocks.set(deploymentId, job);
 }

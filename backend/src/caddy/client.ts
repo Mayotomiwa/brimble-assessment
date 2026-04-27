@@ -93,15 +93,16 @@ export const caddyClient = {
   },
 
   async updateRoute(deploymentId: string, newHostPort: number): Promise<void> {
-    const res = await adminRequest(
-      'PUT',
-      `${ROUTES_PATH}/.../deploy-${deploymentId}`,
-      {
-        handler: 'reverse_proxy',
-        upstreams: [{ dial: `${env.dockerGatewayIp}:${newHostPort}` }],
-      },
-    );
-    if (!res.ok) throw new Error(`Caddy updateRoute failed: ${res.status}`);
+    const routeId = `deploy-${deploymentId}`;
+    const getRes = await adminRequest('GET', `${ROUTES_PATH}/.../${routeId}`);
+    if (!getRes.ok) throw new Error(`Caddy updateRoute GET failed: ${getRes.status} ${getRes.text}`);
+    const route = JSON.parse(getRes.text);
+    const proxyHandle = (route.handle as any[])?.find((h: any) => h.handler === 'reverse_proxy');
+    if (proxyHandle) {
+      proxyHandle.upstreams[0].dial = `${env.dockerGatewayIp}:${newHostPort}`;
+    }
+    const putRes = await adminRequest('PUT', `${ROUTES_PATH}/.../${routeId}`, route);
+    if (!putRes.ok) throw new Error(`Caddy updateRoute PUT failed: ${putRes.status} ${putRes.text}`);
   },
 
   async removeRoute(deploymentId: string): Promise<void> {

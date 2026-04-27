@@ -41,11 +41,20 @@ export async function runPipeline(deploymentId: string): Promise<void> {
     await db.updateStatus(deploymentId, 'deploying');
     sseBroker.broadcast(deploymentId, { line: '=== Starting container ===', phase: 'deploy' });
 
+    const oldContainerId = deployment.container_id;
+    const hasExistingRoute = !!deployment.caddy_route_id;
+
     newContainerId = await dockerClient.runContainer(registryRef);
     const hostPort = await dockerClient.getHostPort(newContainerId);
     await dockerClient.healthCheck(newContainerId, hostPort);
 
-    const routeId = await caddyClient.addRoute(deploymentId, hostPort);
+    if (hasExistingRoute) {
+      // Zero-downtime: record old container, atomically swap Caddy upstream, then drain old
+      await db.updateDeployment(deploymentId, { prev_container_id: oldContainerId });
+      await caddyClient.updateRoute(deploymentId, hostPort);
+    } else {
+      await caddyClient.addRoute(deploymentId, hostPort);
+    }
 
     // ── PHASE: running ─────────────────────────────────────────────────
     const liveUrl = `http://localhost/deploys/${deploymentId}`;
@@ -54,9 +63,15 @@ export async function runPipeline(deploymentId: string): Promise<void> {
       container_id: newContainerId,
       host_port: hostPort,
       live_url: liveUrl,
-      caddy_route_id: routeId,
+      caddy_route_id: `deploy-${deploymentId}`,
       current_image_tag_id: tagRecord.id,
+      prev_container_id: null,
     });
+
+    // Stop old container only after DB is updated — Caddy already points to new container
+    if (oldContainerId && hasExistingRoute) {
+      await dockerClient.stopContainer(oldContainerId).catch(() => {});
+    }
 
     sseBroker.broadcast(deploymentId, { line: `=== Running at ${liveUrl} ===`, phase: 'deploy' });
     sseBroker.close(deploymentId);
@@ -174,4 +189,54 @@ async function writeLog(
 ) {
   const row = await db.insertLog({ deploymentId, line, stream, phase });
   sseBroker.broadcast(deploymentId, { id: row.id, line, phase });
+}
+
+// ── Rollback ───────────────────────────────────────────────────────────────
+
+export async function runRollback(deploymentId: string, registryRef: string): Promise<void> {
+  let newContainerId: string | null = null;
+
+  try {
+    const deployment = await db.getDeployment(deploymentId);
+    if (!deployment) throw new Error(`Deployment ${deploymentId} not found`);
+
+    await db.updateStatus(deploymentId, 'deploying');
+    sseBroker.broadcast(deploymentId, { line: `=== Rolling back to ${registryRef} ===`, phase: 'deploy' });
+
+    const oldContainerId = deployment.container_id;
+    const hasExistingRoute = !!deployment.caddy_route_id;
+
+    newContainerId = await dockerClient.runContainer(registryRef);
+    const hostPort = await dockerClient.getHostPort(newContainerId);
+    await dockerClient.healthCheck(newContainerId, hostPort);
+
+    if (hasExistingRoute) {
+      await db.updateDeployment(deploymentId, { prev_container_id: oldContainerId });
+      await caddyClient.updateRoute(deploymentId, hostPort);
+    } else {
+      await caddyClient.addRoute(deploymentId, hostPort);
+    }
+
+    await db.updateDeployment(deploymentId, {
+      status: 'running',
+      container_id: newContainerId,
+      host_port: hostPort,
+      caddy_route_id: `deploy-${deploymentId}`,
+      prev_container_id: null,
+    });
+
+    if (oldContainerId && hasExistingRoute) {
+      await dockerClient.stopContainer(oldContainerId).catch(() => {});
+    }
+
+    sseBroker.broadcast(deploymentId, { line: '=== Rollback complete ===', phase: 'deploy' });
+    sseBroker.close(deploymentId);
+
+  } catch (err: any) {
+    console.error(`[pipeline] rollback ${deploymentId} failed:`, err.message);
+    await db.updateStatus(deploymentId, 'failed').catch(() => {});
+    if (newContainerId) await dockerClient.stopContainer(newContainerId).catch(() => {});
+    sseBroker.broadcast(deploymentId, { line: `=== Rollback failed: ${err.message} ===`, phase: 'deploy' });
+    sseBroker.close(deploymentId);
+  }
 }

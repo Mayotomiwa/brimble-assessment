@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import { DeployForm } from '../components/DeployForm';
 import { DeploymentList } from '../components/DeploymentList';
+import { ImageTagHistory } from '../components/ImageTagHistory';
 import { LogStream } from '../components/LogStream';
 
 export function IndexPage() {
@@ -30,11 +31,14 @@ export function IndexPage() {
         onSelect={setSelectedId}
       />
       {selectedId && (
-        <LogStream
-          key={selectedId}
-          deploymentId={selectedId}
-          onTerminal={() => queryClient.invalidateQueries({ queryKey: ['deployments'] })}
-        />
+        <>
+          <LogStream
+            key={selectedId}
+            deploymentId={selectedId}
+            onTerminal={() => queryClient.invalidateQueries({ queryKey: ['deployments'] })}
+          />
+          <ImageTagHistory deploymentId={selectedId} />
+        </>
       )}
     </div>
   );
