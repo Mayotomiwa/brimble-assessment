@@ -1,5 +1,8 @@
 FROM node:20-slim
 
+# docker CLI binary (docker-container:// transport, no daemon needed)
+COPY --from=docker:cli /usr/local/bin/docker /usr/local/bin/docker
+
 # git: cloning repos | railpack: building container images from source
 RUN apt-get update && apt-get install -y \
     git \

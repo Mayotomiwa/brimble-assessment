@@ -8,6 +8,7 @@ import { LogStream } from '../components/LogStream';
 
 export function IndexPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [logKey, setLogKey] = useState(0);
   const queryClient = useQueryClient();
 
   const { data: deployments = [] } = useQuery({
@@ -25,6 +26,7 @@ export function IndexPage() {
     await api.redeploy(id);
     queryClient.invalidateQueries({ queryKey: ['deployments'] });
     setSelectedId(id);
+    setLogKey(k => k + 1);
   }
 
   async function handleDelete(id: string) {
@@ -47,7 +49,7 @@ export function IndexPage() {
       {selectedId && (
         <>
           <LogStream
-            key={selectedId}
+            key={`${selectedId}-${logKey}`}
             deploymentId={selectedId}
             onTerminal={() => queryClient.invalidateQueries({ queryKey: ['deployments'] })}
           />

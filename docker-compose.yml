@@ -35,10 +35,9 @@ services:
       DATABASE_URL:           postgres://app:app@db:5432/app
       CADDY_ADMIN_URL:        http://caddy:2019
       REGISTRY_URL:           registry:5002
-      BUILDKIT_HOST:          tcp://buildkit:1234
-      # CRITICAL: 172.17.0.1 is the Linux docker0 bridge IP.
-      # Mac/Windows users: set DOCKER_GATEWAY_IP=host.docker.internal in .env
-      DOCKER_GATEWAY_IP:      172.17.0.1
+      BUILDKIT_HOST:          docker-container://buildkit
+      # host.docker.internal works on Mac/Windows; on Linux set to 172.17.0.1 or host-gateway
+      DOCKER_GATEWAY_IP:      host.docker.internal
       HEALTH_CHECK_RETRIES:   "5"
       HEALTH_CHECK_INTERVAL:  "2000"
       SIGTERM_TIMEOUT:        "10"

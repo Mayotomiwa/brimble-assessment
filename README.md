@@ -12,9 +12,9 @@ docker compose up --build
 
 Then open **http://localhost**.
 
-> **Mac / Windows Docker Desktop:** the default `DOCKER_GATEWAY_IP` is `172.17.0.1` (Linux bridge). Create a `.env` file in the repo root before starting:
+> **Linux hosts:** the default `DOCKER_GATEWAY_IP` is `host.docker.internal` (Mac/Windows Docker Desktop). On Linux, override it before starting:
 > ```bash
-> DOCKER_GATEWAY_IP=host.docker.internal
+> echo "DOCKER_GATEWAY_IP=172.17.0.1" > .env
 > ```
 > Compose reads `.env` automatically.
 

@@ -45,16 +45,28 @@ export const dockerClient = {
       // image is in local store from Railpack's tarball export — createContainer will find it
     }
 
+    // Railpack images don't include EXPOSE, so PublishAllPorts produces no bindings.
+    // Bind port 3000 (Railpack's default app port) to a random host port explicitly.
     const container = await docker.createContainer({
       Image: registryRef,
+      Env: ['PORT=3000'],
+      ExposedPorts: { '3000/tcp': {} },
       HostConfig: {
-        PublishAllPorts: true,
+        PortBindings: { '3000/tcp': [{ HostPort: '' }] },
         RestartPolicy: { Name: 'no' },
       },
     });
 
     await container.start();
     return container.id;
+  },
+
+  async tagImage(localName: string, registryRef: string): Promise<void> {
+    const image = docker.getImage(localName);
+    const lastColon = registryRef.lastIndexOf(':');
+    const repo = registryRef.substring(0, lastColon);
+    const tag = registryRef.substring(lastColon + 1);
+    await image.tag({ repo, tag });
   },
 
   async pushImage(registryRef: string): Promise<void> {
@@ -74,10 +86,10 @@ export const dockerClient = {
     const info = await docker.getContainer(containerId).inspect();
     const ports = info.NetworkSettings.Ports;
 
-    for (const binding of Object.values(ports)) {
-      if (binding && binding.length > 0) {
-        return parseInt(binding[0].HostPort, 10);
-      }
+    // Prefer 3000/tcp (Railpack default), then fall back to any bound port.
+    const binding = ports['3000/tcp'] ?? Object.values(ports).find(b => b && b.length > 0);
+    if (binding && binding.length > 0) {
+      return parseInt(binding[0].HostPort, 10);
     }
 
     throw new Error(`No port bindings found for container ${containerId}`);
