@@ -15,6 +15,7 @@ export async function runPipeline(deploymentId: string): Promise<void> {
     const deployment = await db.getDeployment(deploymentId);
     if (!deployment) throw new Error(`Deployment ${deploymentId} not found`);
 
+    await db.clearLogs(deploymentId);
     sourceDir = await prepareSource(deployment);
 
     // ── PHASE: building ────────────────────────────────────────────────
@@ -22,14 +23,22 @@ export async function runPipeline(deploymentId: string): Promise<void> {
     sseBroker.broadcast(deploymentId, { line: '=== Build started ===', phase: 'build' });
 
     const imageTag = `sha-${Date.now()}`;
+    // Use a plain local name for Railpack — passing a registry-prefixed name causes
+    // BuildKit to add a registry-push exporter alongside the docker export, which
+    // hangs indefinitely because the host daemon can't resolve the Compose DNS name.
+    const localImageName = `app-${deploymentId}:${imageTag}`;
     const registryRef = `${env.registryUrl}/app-${deploymentId}:${imageTag}`;
     const cacheKey = deployment.cache_key ?? null;
 
-    await runRailpack(deploymentId, sourceDir, registryRef, cacheKey);
+    await runRailpack(deploymentId, sourceDir, localImageName, cacheKey);
+
+    // Tag the locally loaded image with the registry ref so Docker can find it
+    // by registry name when running/rolling back.
+    await dockerClient.tagImage(localImageName, registryRef);
 
     // Push to registry for rollback support. Best-effort with a hard timeout —
-    // the Docker daemon may not be able to reach registry:5000 over HTTP from the host,
-    // so we never let a stalled push block the deploy.
+    // the Docker daemon may not be able to reach registry:5002 over the Compose
+    // network from the host daemon, so we never let a stalled push block the deploy.
     try {
       await Promise.race([
         dockerClient.pushImage(registryRef),
@@ -125,14 +134,18 @@ async function cloneRepo(gitUrl: string, targetDir: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proc = spawn('git', ['clone', '--depth', '1', gitUrl, targetDir]);
 
+    let stderr = '';
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
     const timer = setTimeout(() => {
       proc.kill();
-      reject(new Error('git clone timed out after 60s'));
-    }, 60_000);
+      reject(new Error('git clone timed out after 120s'));
+    }, 120_000);
 
     proc.on('exit', code => {
       clearTimeout(timer);
-      code === 0 ? resolve() : reject(new Error(`git clone failed with code ${code}`));
+      if (code === 0) resolve();
+      else reject(new Error(`git clone failed with code ${code}: ${stderr.trim()}`));
     });
 
     proc.on('error', err => {
@@ -211,6 +224,7 @@ export async function runRollback(deploymentId: string, registryRef: string): Pr
     const deployment = await db.getDeployment(deploymentId);
     if (!deployment) throw new Error(`Deployment ${deploymentId} not found`);
 
+    await db.clearLogs(deploymentId);
     await db.updateStatus(deploymentId, 'deploying');
     sseBroker.broadcast(deploymentId, { line: `=== Rolling back to ${registryRef} ===`, phase: 'deploy' });
 

@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { env } from '../env';
 
-const ROUTES_PATH = '/config/apps/http/servers/main/routes';
+const ROUTES_PATH = '/config/apps/http/servers/srv0/routes';
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -65,50 +65,56 @@ export async function waitForCaddy(retries = 10, delayMs = 1000): Promise<void> 
   process.exit(1);
 }
 
+function buildRoute(deploymentId: string, hostPort: number) {
+  return {
+    '@id': `deploy-${deploymentId}`,
+    match: [{ path: [`/deploys/${deploymentId}`, `/deploys/${deploymentId}/*`] }],
+    handle: [
+      {
+        handler: 'subroute',
+        routes: [{
+          handle: [{
+            handler: 'rewrite',
+            uri_substring: [{ find: `/deploys/${deploymentId}`, replace: '' }],
+          }],
+        }],
+      },
+      {
+        handler: 'reverse_proxy',
+        upstreams: [{ dial: `${env.dockerGatewayIp}:${hostPort}` }],
+      },
+    ],
+  };
+}
+
 export const caddyClient = {
   async addRoute(deploymentId: string, hostPort: number): Promise<string> {
-    const route = {
-      '@id': `deploy-${deploymentId}`,
-      match: [{ path: [`/deploys/${deploymentId}`, `/deploys/${deploymentId}/*`] }],
-      handle: [
-        {
-          handler: 'subroute',
-          routes: [{
-            handle: [{
-              handler: 'rewrite',
-              uri_substring: [{ find: `/deploys/${deploymentId}`, replace: '' }],
-            }],
-          }],
-        },
-        {
-          handler: 'reverse_proxy',
-          upstreams: [{ dial: `${env.dockerGatewayIp}:${hostPort}` }],
-        },
-      ],
-    };
-
-    const res = await adminRequest('POST', ROUTES_PATH, route);
+    const res = await adminRequest('POST', ROUTES_PATH, buildRoute(deploymentId, hostPort));
     if (!res.ok) throw new Error(`Caddy addRoute failed: ${res.status} ${res.text}`);
     return `deploy-${deploymentId}`;
   },
 
   async updateRoute(deploymentId: string, newHostPort: number): Promise<void> {
-    const routeId = `deploy-${deploymentId}`;
-    const getRes = await adminRequest('GET', `${ROUTES_PATH}/.../${routeId}`);
-    if (!getRes.ok) throw new Error(`Caddy updateRoute GET failed: ${getRes.status} ${getRes.text}`);
-    const route = JSON.parse(getRes.text);
-    const proxyHandle = (route.handle as any[])?.find((h: any) => h.handler === 'reverse_proxy');
-    if (proxyHandle) {
-      proxyHandle.upstreams[0].dial = `${env.dockerGatewayIp}:${newHostPort}`;
+    // DELETE all instances (handles duplicates from corrupted state), then POST fresh.
+    // PUT /id/{id} fails with 400 "duplicate ID" if a previous broken update left two
+    // routes with the same @id. DELETE + POST is simpler and avoids the GET-modify-PUT cycle.
+    let deleted = true;
+    while (deleted) {
+      const res = await adminRequest('DELETE', `/id/deploy-${deploymentId}`);
+      if (!res.ok && res.status !== 404) throw new Error(`Caddy updateRoute delete failed: ${res.status} ${res.text}`);
+      deleted = res.ok;
     }
-    const putRes = await adminRequest('PUT', `${ROUTES_PATH}/.../${routeId}`, route);
-    if (!putRes.ok) throw new Error(`Caddy updateRoute PUT failed: ${putRes.status} ${putRes.text}`);
+    const postRes = await adminRequest('POST', ROUTES_PATH, buildRoute(deploymentId, newHostPort));
+    if (!postRes.ok) throw new Error(`Caddy updateRoute add failed: ${postRes.status} ${postRes.text}`);
   },
 
   async removeRoute(deploymentId: string): Promise<void> {
-    const res = await adminRequest('DELETE', `${ROUTES_PATH}/.../deploy-${deploymentId}`);
-    if (!res.ok && res.status !== 404) {
-      throw new Error(`Caddy removeRoute failed: ${res.status}`);
+    // Loop to handle the case where duplicates exist.
+    let deleted = true;
+    while (deleted) {
+      const res = await adminRequest('DELETE', `/id/deploy-${deploymentId}`);
+      if (!res.ok && res.status !== 404) throw new Error(`Caddy removeRoute failed: ${res.status}`);
+      deleted = res.ok;
     }
   },
 };
