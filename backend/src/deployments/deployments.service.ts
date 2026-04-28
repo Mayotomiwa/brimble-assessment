@@ -51,6 +51,7 @@ export class DeploymentsService {
     if (this.worker.isBuilding(id)) {
       throw new ConflictException({ error: 'Build already in progress', code: 'BUILD_IN_PROGRESS' });
     }
+    await db.updateStatus(id, 'pending');
     this.worker.enqueue(id);
   }
 

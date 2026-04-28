@@ -149,6 +149,10 @@ export const db = {
 
   // ── Logs ───────────────────────────────────────────────────────────────
 
+  async clearLogs(deploymentId: string): Promise<void> {
+    await pool().query(`DELETE FROM logs WHERE deployment_id = $1`, [deploymentId]);
+  },
+
   async insertLog(input: {
     deploymentId: string;
     line: string;
