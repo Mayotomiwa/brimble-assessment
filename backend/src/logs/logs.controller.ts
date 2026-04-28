@@ -12,23 +12,37 @@ export class LogsController {
 
     const lastEventId = req.headers['last-event-id'] as string | undefined;
 
-    // Subscribe BEFORE replaying history — prevents losing lines emitted
+    // Subscribe BEFORE replaying history — prevents losing lines broadcast
     // between the DB query returning and the subscriber being registered.
     const unsubscribe = sseBroker.subscribe(id, res);
     req.on('close', unsubscribe);
 
-    // Replay persisted logs (full history, or from Last-Event-ID on reconnect)
+    // Replay persisted logs. Guard each write: sseBroker.close() may fire during
+    // this loop (pipeline finished while we were awaiting getLogs), which calls
+    // res.end() — any write after that throws and aborts the loop.
     const logs = await db.getLogs(id, { afterId: lastEventId });
     for (const log of logs) {
+      if (res.writableEnded) break;
       res.write(
         `id: ${log.id}\nevent: log\ndata: ${JSON.stringify({ line: log.line, phase: log.phase })}\n\n`,
       );
     }
 
-    // If already terminal, close immediately after replay
-    if (deployment.status === 'running' || deployment.status === 'failed') {
-      res.write('event: done\ndata: {}\n\n');
-      res.end();
+    if (res.writableEnded) {
+      // sseBroker.close() already fired during replay — stream is done.
+      return;
+    }
+
+    // Re-fetch status: the cached `deployment` may be stale if the pipeline
+    // finished between the initial fetch and now.
+    const fresh = await db.getDeployment(id);
+    const isTerminal = fresh?.status === 'running' || fresh?.status === 'failed';
+
+    if (isTerminal && !res.writableEnded) {
+      try {
+        res.write('event: done\ndata: {}\n\n');
+        res.end();
+      } catch { /* sseBroker.close() raced us to res.end() */ }
       unsubscribe();
     }
     // Otherwise stay open — sseBroker.close() ends the stream when the pipeline finishes

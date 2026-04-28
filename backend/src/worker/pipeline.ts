@@ -15,12 +15,11 @@ export async function runPipeline(deploymentId: string): Promise<void> {
     const deployment = await db.getDeployment(deploymentId);
     if (!deployment) throw new Error(`Deployment ${deploymentId} not found`);
 
-    await db.clearLogs(deploymentId);
     sourceDir = await prepareSource(deployment);
 
     // ── PHASE: building ────────────────────────────────────────────────
     await db.updateStatus(deploymentId, 'building');
-    sseBroker.broadcast(deploymentId, { line: '=== Build started ===', phase: 'build' });
+    await writeLog(deploymentId, '=== Build started ===', 'stdout', 'build');
 
     const imageTag = `sha-${Date.now()}`;
     // Use a plain local name for Railpack — passing a registry-prefixed name causes
@@ -60,7 +59,7 @@ export async function runPipeline(deploymentId: string): Promise<void> {
 
     // ── PHASE: deploying ───────────────────────────────────────────────
     await db.updateStatus(deploymentId, 'deploying');
-    sseBroker.broadcast(deploymentId, { line: '=== Starting container ===', phase: 'deploy' });
+    await writeLog(deploymentId, '=== Starting container ===', 'stdout', 'deploy');
 
     const oldContainerId = deployment.container_id;
     const hasExistingRoute = !!deployment.caddy_route_id;
@@ -94,7 +93,7 @@ export async function runPipeline(deploymentId: string): Promise<void> {
       await dockerClient.stopContainer(oldContainerId).catch(() => {});
     }
 
-    sseBroker.broadcast(deploymentId, { line: `=== Running at ${liveUrl} ===`, phase: 'deploy' });
+    await writeLog(deploymentId, `=== Running at ${liveUrl} ===`, 'stdout', 'deploy');
     sseBroker.close(deploymentId);
 
   } catch (err: any) {
@@ -105,7 +104,7 @@ export async function runPipeline(deploymentId: string): Promise<void> {
       await dockerClient.stopContainer(newContainerId).catch(() => {});
     }
 
-    sseBroker.broadcast(deploymentId, { line: `=== Failed: ${err.message} ===`, phase: 'build' });
+    await writeLog(deploymentId, `=== Failed: ${err.message} ===`, 'stderr', 'build').catch(() => {});
     sseBroker.close(deploymentId);
 
   } finally {
@@ -224,9 +223,8 @@ export async function runRollback(deploymentId: string, registryRef: string): Pr
     const deployment = await db.getDeployment(deploymentId);
     if (!deployment) throw new Error(`Deployment ${deploymentId} not found`);
 
-    await db.clearLogs(deploymentId);
     await db.updateStatus(deploymentId, 'deploying');
-    sseBroker.broadcast(deploymentId, { line: `=== Rolling back to ${registryRef} ===`, phase: 'deploy' });
+    await writeLog(deploymentId, `=== Rolling back to ${registryRef} ===`, 'stdout', 'deploy');
 
     const oldContainerId = deployment.container_id;
     const hasExistingRoute = !!deployment.caddy_route_id;
@@ -254,14 +252,14 @@ export async function runRollback(deploymentId: string, registryRef: string): Pr
       await dockerClient.stopContainer(oldContainerId).catch(() => {});
     }
 
-    sseBroker.broadcast(deploymentId, { line: '=== Rollback complete ===', phase: 'deploy' });
+    await writeLog(deploymentId, '=== Rollback complete ===', 'stdout', 'deploy');
     sseBroker.close(deploymentId);
 
   } catch (err: any) {
     console.error(`[pipeline] rollback ${deploymentId} failed:`, err.message);
     await db.updateStatus(deploymentId, 'failed').catch(() => {});
     if (newContainerId) await dockerClient.stopContainer(newContainerId).catch(() => {});
-    sseBroker.broadcast(deploymentId, { line: `=== Rollback failed: ${err.message} ===`, phase: 'deploy' });
+    await writeLog(deploymentId, `=== Rollback failed: ${err.message} ===`, 'stderr', 'deploy').catch(() => {});
     sseBroker.close(deploymentId);
   }
 }

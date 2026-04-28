@@ -52,6 +52,7 @@ export class DeploymentsService {
       throw new ConflictException({ error: 'Build already in progress', code: 'BUILD_IN_PROGRESS' });
     }
     await db.updateStatus(id, 'pending');
+    await db.clearLogs(id);
     this.worker.enqueue(id);
   }
 
@@ -63,6 +64,8 @@ export class DeploymentsService {
     }
     const tag = await db.getImageTag(body.imageTagId);
     if (!tag) throw new NotFoundException('Image tag not found');
+    await db.updateStatus(id, 'pending');
+    await db.clearLogs(id);
     this.worker.enqueueRollback(id, tag.registry_ref);
   }
 
